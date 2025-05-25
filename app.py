@@ -53,79 +53,85 @@ with st.expander("⚙️ Diagnostics and Input Info", expanded=False):
 
 ##### --- Section 2 - Variable Selection UI ---
 
-st.markdown("---")
-st.subheader("🧠 Define Rule: If A and B then C")
+# ---- Section 2: Select Target and Explanatory Variables ----
+st.markdown("## 🎯 Step 2: Define Target and Explanatory Variables")
 
-st.markdown(
-    "You can evaluate how combinations of two factors (A and B) predict an outcome (C). "
-    "We'll compute the conditional accuracy of 'If A and B then C' and assess the unique contribution of A."
-)
+categorical_cols = df.select_dtypes(include='object').columns.tolist()
+target_variable = st.selectbox("🎯 Target Variable (A)", categorical_cols, key="target_var")
+target_value = st.selectbox(f"🎯 Value in {target_variable} to Explain (A1)", df[target_variable].unique().tolist(), key="target_val")
 
-# --- Column selection ---
-non_numeric_cols = df.select_dtypes(exclude='number').columns.tolist()
-categorical_cols = [col for col in non_numeric_cols if df[col].nunique() < 20]
+independent_vars = st.multiselect("📋 Explanatory Variables (B, C, D, etc.)", [c for c in categorical_cols if c != target_variable], max_selections=4)
 
-if len(categorical_cols) < 3:
-    st.warning("⚠️ Please ensure your dataset includes at least 3 categorical columns with fewer than 20 unique values.")
-    st.stop()
-
-# -- Select A, B, and C columns --
-col_A = st.selectbox("🔷 Select A (1st condition column)", categorical_cols, index=0)
-val_A = st.selectbox(f"Value for A (from column `{col_A}`)", sorted(df[col_A].dropna().unique().tolist()))
-
-col_B = st.selectbox("🔶 Select B (2nd condition column)", [col for col in categorical_cols if col != col_A])
-val_B = st.selectbox(f"Value for B (from column `{col_B}`)", sorted(df[col_B].dropna().unique().tolist()))
-
-col_C = st.selectbox("🔴 Select C (Outcome column)", [col for col in categorical_cols if col not in [col_A, col_B]])
-val_C = st.selectbox(f"Value for C (from column `{col_C}`)", sorted(df[col_C].dropna().unique().tolist()))
-
-# Save in session state for later
-st.session_state.condition_def = {
-    "col_A": col_A, "val_A": val_A,
-    "col_B": col_B, "val_B": val_B,
-    "col_C": col_C, "val_C": val_C
-}
 
 
 ##### --- Section 3 - Compute Accuracy and Factor Contributions ---
 
-st.markdown("---")
-st.subheader("📊 Compute Accuracy and Factor Contribution")
+# ---- Section 3: Generate Explanation Table ----
 
-if "condition_def" not in st.session_state:
-    st.warning("Please define A, B, and C conditions above.")
-    st.stop()
+st.markdown("### 🔎 Optional Filters")
+min_n = st.number_input("Minimum number of matching rows (n)", value=5, min_value=0)
+min_acc = st.slider(f"Minimum accuracy of rule → {target_value}", 0.0, 1.0, 0.0, 0.01)
+min_contrib = st.slider("Minimum absolute contribution of any factor", 0.0, 1.0, 0.0, 0.01)
 
-cd = st.session_state.condition_def
 
-# --- Filters ---
-df_ab = df[(df[cd["col_A"]] == cd["val_A"]) & (df[cd["col_B"]] == cd["val_B"])]
-df_b = df[df[cd["col_B"]] == cd["val_B"]]
 
-# --- Accuracy Calculations ---
-def safe_accuracy(subset, col_c, val_c):
-    if len(subset) == 0:
-        return None
-    return (subset[col_c] == val_c).mean()
+if st.button("🔍 Generate Factor Contribution Table") and target_variable and target_value and independent_vars:
+    from itertools import product
 
-acc_ab = safe_accuracy(df_ab, cd["col_C"], cd["val_C"])
-acc_b = safe_accuracy(df_b, cd["col_C"], cd["val_C"])
-contrib = acc_ab - acc_b if acc_ab is not None and acc_b is not None else None
+    combinations = list(product(*[df[var].unique() for var in independent_vars]))
+    rows = []
 
-# --- Display results ---
-st.markdown("### 🧮 Results")
+    for combo in combinations:
+        combo_dict = dict(zip(independent_vars, combo))
+        condition = (df[list(combo_dict)] == pd.Series(combo_dict)).all(axis=1)
+        subset = df[condition]
 
-def fmt(x):
-    return f"{x:.3f}" if x is not None else "N/A"
+        if len(subset) == 0:
+            continue
 
-st.markdown(f"**Accuracy if A and B then C**: {fmt(acc_ab)}")
-st.markdown(f"**Accuracy if B then C**: {fmt(acc_b)}")
-st.markdown(f"**Estimated Contribution of A**: {fmt(contrib)}")
+        acc_full = (subset[target_variable] == target_value).mean()
+        rule_str = " AND ".join([f"{k}={v}" for k, v in combo_dict.items()])
+        row = {
+            'Rule': rule_str,
+            'n': len(subset),
+            f'Accuracy if Rule → {target_value}': acc_full
+        }
 
-if contrib is not None:
-    st.success(f"✅ Contribution of A is **{fmt(contrib)}**")
-else:
-    st.error("❌ Cannot compute contribution: one of the required subsets is empty.")
+        for var in independent_vars:
+            reduced = {k: v for k, v in combo_dict.items() if k != var}
+            reduced_df = df[(df[list(reduced)] == pd.Series(reduced)).all(axis=1)]
+            if len(reduced_df) > 0:
+                acc_reduced = (reduced_df[target_variable] == target_value).mean()
+                row[f'Contribution of {var}'] = acc_full - acc_reduced
+            else:
+                row[f'Contribution of {var}'] = None
+
+        rows.append(row)
+
+        result_df = pd.DataFrame(rows)
+
+        # Apply filters
+        filtered_df = result_df.copy()
+        filtered_df = filtered_df[filtered_df['n'] >= min_n]
+        filtered_df = filtered_df[filtered_df[f'Accuracy if Rule → {target_value}'] >= min_acc]
+
+        if min_contrib > 0:
+            contrib_cols = [col for col in result_df.columns if col.startswith("Contribution of")]
+            mask = (filtered_df[contrib_cols].abs() >= min_contrib).any(axis=1)
+            filtered_df = filtered_df[mask]
+
+        if len(filtered_df) == 0:
+            st.warning("⚠️ No rows matched the filter criteria.")
+        else:
+            st.success(f"✅ Showing {len(filtered_df)} matching rule(s)")
+            st.session_state.modified_df = filtered_df.copy()
+            st.dataframe(filtered_df)
+    
+    
+    
+    st.session_state.modified_df = result_df.copy()
+    st.dataframe(result_df)
+
 	
 	
 ##### --- Section 4 - Optional Save and SuAVE Upload ---
