@@ -69,9 +69,14 @@ independent_vars = st.multiselect("📋 Explanatory Variables (B, C, D, etc.)", 
 # ---- Section 3: Generate Explanation Table ----
 
 st.markdown("### 🔎 Optional Filters")
-min_n = st.number_input("Minimum number of matching rows (n)", value=5, min_value=0)
-min_acc = st.slider(f"Minimum accuracy of rule → {target_value}", 0.0, 1.0, 0.0, 0.01)
-min_contrib = st.slider("Minimum absolute contribution of any factor", 0.0, 1.0, 0.0, 0.01)
+
+col1, col2, col3 = st.columns([1, 2, 2])
+with col1:
+    min_n = st.number_input("Min rows (n)", value=5, min_value=0)
+with col2:
+    min_acc = st.slider("Min accuracy", 0.0, 1.0, 0.0, 0.01)
+with col3:
+    min_contrib = st.slider("Min contribution", 0.0, 1.0, 0.0, 0.01)
 
 
 
@@ -138,53 +143,23 @@ if st.button("🔍 Generate Factor Contribution Table") and target_variable and 
     st.dataframe(result_df)
 
 	
-	
-##### --- Section 4 - Optional Save and SuAVE Upload ---
+##### --- Section 4 - Download Results Table ---
 
 st.markdown("---")
-st.subheader("📤 Publish Factor Contribution to SuAVE")
+st.subheader("💾 Download Factor Contribution Table")
 
-from suave_uploader import upload_to_suave
+if "modified_df" in st.session_state and not st.session_state.modified_df.empty:
+    csv_out = io.StringIO()
+    st.session_state.modified_df.to_csv(csv_out, index=False)
+    st.download_button(
+        label="📥 Download CSV",
+        data=csv_out.getvalue(),
+        file_name="factor_contributions.csv",
+        mime="text/csv"
+    )
+else:
+    st.warning("⚠️ No data available to download yet. Please run the analysis first.")
 
-# Add contribution column if it doesn't exist yet
-if contrib is not None and "factor_contribution#number" not in df.columns:
-    df["factor_contribution#number"] = None
-    df.loc[df_ab.index, "factor_contribution#number"] = contrib
-    st.session_state.modified_df = df.copy()
-    st.session_state.last_new_var = "factor_contribution#number"
-
-auth_user = st.text_input("🔐 SuAVE Login:")
-auth_pass = st.text_input("🔑 SuAVE Password:", type="password")
-
-base_name = csv_filename.replace(".csv", "").split("_", 1)[-1]
-suggested_name = f"{base_name}_contrib_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-survey_name = st.text_input("📛 Name for New Survey:", value=suggested_name)
-
-if st.button("📦 Upload to SuAVE"):
-    if not survey_name or not auth_user or not auth_pass:
-        st.warning("⚠️ Please fill in all fields before uploading.")
-    else:
-        parsed = urlparse(survey_url)
-        referer = survey_url.split("/main")[0] + "/"
-        df_to_upload = st.session_state.get("modified_df", df)
-
-        if "last_new_var" in st.session_state:
-            st.info(f"🔄 The variable **{st.session_state.last_new_var}** will be included in the uploaded survey.")
-
-        success, message, new_url = upload_to_suave(
-            df_to_upload,
-            survey_name,
-            auth_user,
-            auth_pass,
-            referer,
-            dzc_file=query_params.get("dzc", None)
-        )
-
-        if success:
-            st.success(message)
-            st.markdown(f"🔗 [Open New Survey in SuAVE]({new_url})")
-        else:
-            st.error(f"❌ {message}")
 
 # ---- Return to Home button ----
 param_str = urlencode({k: v[0] if isinstance(v, list) else v for k, v in query_params.items()})
