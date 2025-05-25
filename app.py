@@ -120,6 +120,11 @@ if st.button("🔍 Generate Factor Contribution Table") and target_variable and 
             mask = (filtered_df[contrib_cols].abs() >= min_contrib).any(axis=1)
             filtered_df = filtered_df[mask]
 
+        sort_col = st.selectbox("📊 Sort by column", options=filtered_df.columns.tolist(), index=0)
+        sort_ascending = st.radio("⬆️ Sort order", ["Descending", "Ascending"]) == "Ascending"
+        filtered_df = filtered_df.sort_values(by=sort_col, ascending=sort_ascending)
+
+
         if len(filtered_df) == 0:
             st.warning("⚠️ No rows matched the filter criteria.")
         else:
