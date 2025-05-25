@@ -77,23 +77,22 @@ independent_vars = st.multiselect("📋 Explanatory Variables (B, C, D, etc.)", 
 
 ##### --- Section 3 - Compute Accuracy and Factor Contributions ---
 
-# ---- Section 3: Generate Explanation Table ----
+st.markdown("## 🧮 Step 3: Compute Rules and Factor Contributions")
 
-st.markdown("### 🔎 Optional Filters")
+# Sliders for dynamic filtering – compact layout
+with st.container():
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        min_n = st.number_input("Min rows (n)", value=5, min_value=0, key="min_n")
+    with c2:
+        min_acc = st.slider("Min accuracy", 0.0, 1.0, 0.0, 0.01, key="min_acc")
+    with c3:
+        min_contrib = st.slider("Min |contrib|", 0.0, 1.0, 0.0, 0.01, key="min_contrib")
 
-col1, col2, col3 = st.columns([1, 2, 2])
-with col1:
-    min_n = st.number_input("Min rows (n)", value=5, min_value=0)
-with col2:
-    min_acc = st.slider("Min accuracy", 0.0, 1.0, 0.0, 0.01)
-with col3:
-    min_contrib = st.slider("Min contribution", 0.0, 1.0, 0.0, 0.01)
+# Generate combinations and compute contributions
+from itertools import product
 
-
-
-if st.button("🔍 Generate Factor Contribution Table") and target_variable and target_value and independent_vars:
-    from itertools import product
-
+if target_variable and target_value and independent_vars:
     combinations = list(product(*[df[var].unique() for var in independent_vars]))
     rows = []
 
@@ -110,48 +109,68 @@ if st.button("🔍 Generate Factor Contribution Table") and target_variable and 
         row = {
             'Rule': rule_str,
             'n': len(subset),
-            f'Accuracy if Rule → {target_value}': acc_full
+            f'Accuracy → {target_value}': acc_full
         }
 
         for var in independent_vars:
             reduced = {k: v for k, v in combo_dict.items() if k != var}
             reduced_df = df[(df[list(reduced)] == pd.Series(reduced)).all(axis=1)]
-            if len(reduced_df) > 0:
-                acc_reduced = (reduced_df[target_variable] == target_value).mean()
-                row[f'Contribution of {var}'] = acc_full - acc_reduced
-            else:
-                row[f'Contribution of {var}'] = None
+            acc_reduced = (reduced_df[target_variable] == target_value).mean() if len(reduced_df) > 0 else None
+            row[f'Contribution of {var}'] = acc_full - acc_reduced if acc_reduced is not None else None
 
         rows.append(row)
 
-        result_df = pd.DataFrame(rows)
+    result_df = pd.DataFrame(rows)
 
-        # Apply filters
-        filtered_df = result_df.copy()
-        filtered_df = filtered_df[filtered_df['n'] >= min_n]
-        filtered_df = filtered_df[filtered_df[f'Accuracy if Rule → {target_value}'] >= min_acc]
+    # Apply filters dynamically
+    contrib_cols = [c for c in result_df.columns if c.startswith("Contribution of")]
+    filtered_df = result_df[
+        (result_df['n'] >= min_n) &
+        (result_df[f'Accuracy → {target_value}'] >= min_acc)
+    ]
 
-        if min_contrib > 0:
-            contrib_cols = [col for col in result_df.columns if col.startswith("Contribution of")]
-            mask = (filtered_df[contrib_cols].abs() >= min_contrib).any(axis=1)
-            filtered_df = filtered_df[mask]
+    if min_contrib > 0:
+        mask = (filtered_df[contrib_cols].abs() >= min_contrib).any(axis=1)
+        filtered_df = filtered_df[mask]
 
-        sort_col = st.selectbox("📊 Sort by column", options=filtered_df.columns.tolist(), index=0)
-        sort_ascending = st.radio("⬆️ Sort order", ["Descending", "Ascending"]) == "Ascending"
-        filtered_df = filtered_df.sort_values(by=sort_col, ascending=sort_ascending)
+    # Sort controls
+    st.markdown("#### 🔃 Sort and View")
+    with st.container():
+        s1, s2 = st.columns([2, 1])
+        with s1:
+            sort_col = st.selectbox("📊 Sort by", options=filtered_df.columns.tolist(), index=0)
+        with s2:
+            sort_ascending = st.radio("⬆️ Order", ["Descending", "Ascending"]) == "Ascending"
 
+    filtered_df = filtered_df.sort_values(by=sort_col, ascending=sort_ascending)
 
-        if len(filtered_df) == 0:
-            st.warning("⚠️ No rows matched the filter criteria.")
-        else:
-            st.success(f"✅ Showing {len(filtered_df)} matching rule(s)")
-            st.session_state.modified_df = filtered_df.copy()
-            st.dataframe(filtered_df)
-    
-    
-    
-    st.session_state.modified_df = result_df.copy()
-    st.dataframe(result_df)
+    # Apply conditional styling
+    def highlight(row):
+        style = [''] * len(row)
+        if row[f'Accuracy → {target_value}'] > 0.8:
+            style = ['background-color: lightgreen'] * len(row)
+        for i, col in enumerate(row.index):
+            if col.startswith("Contribution of") and abs(row[col]) > 0.2:
+                style[i] = 'background-color: khaki'
+        return style
+
+    # Display table
+    if filtered_df.empty:
+        st.warning("⚠️ No rules matched the filters.")
+    else:
+        st.success(f"✅ Showing {len(filtered_df)} rules")
+        st.dataframe(filtered_df.style.apply(highlight, axis=1))
+        st.session_state.modified_df = filtered_df.copy()
+
+        # CSV export
+        csv = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="⬇️ Download Table as CSV",
+            data=csv,
+            file_name="factor_contributions.csv",
+            mime="text/csv"
+        )
+
 
 	
 ##### --- Section 4 - Download Results Table ---
