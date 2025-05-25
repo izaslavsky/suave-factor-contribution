@@ -58,7 +58,18 @@ st.markdown("## 🎯 Step 2: Define Target and Explanatory Variables")
 
 categorical_cols = df.select_dtypes(include='object').columns.tolist()
 target_variable = st.selectbox("🎯 Target Variable (A)", categorical_cols, key="target_var")
-target_value = st.selectbox(f"🎯 Value in {target_variable} to Explain (A1)", df[target_variable].unique().tolist(), key="target_val")
+
+value_counts = df[target_variable].value_counts()
+display_options = [f"{val} ({value_counts[val]})" for val in value_counts.index]
+
+selected_display = st.selectbox(
+    f"🎯 Value in {target_variable} to Explain",
+    display_options,
+    key="target_val"
+)
+
+# Extract just the raw value (without the count)
+target_value = selected_display.split(" (")[0]
 
 independent_vars = st.multiselect("📋 Explanatory Variables (B, C, D, etc.)", [c for c in categorical_cols if c != target_variable], max_selections=4)
 
