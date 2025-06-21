@@ -51,33 +51,153 @@ with st.expander("⚙️ Diagnostics and Input Info", expanded=False):
     st.markdown(f"✅ Dataset loaded with **{df.shape[0]} rows** and **{df.shape[1]} columns**")
 
 
-##### --- Section 2 - Variable Selection UI ---
+##### --- Section 2: Define Target and Explanatory Variables ---
 
-# ---- Section 2: Select Target and Explanatory Variables ----
-st.markdown("## 🎯 Step 2: Define Target and Explanatory Variables")
+st.markdown("### 🎯 Define Target and Explanatory Variables")
 
+import matplotlib.pyplot as plt
+import re
+
+original_df = df.copy()
+numeric_cols = [col for col in original_df.columns if "#number" in col]
 categorical_cols = df.select_dtypes(include='object').columns.tolist()
-target_variable = st.selectbox("🎯 Target Variable (A)", categorical_cols, key="target_var")
+all_vars = categorical_cols + numeric_cols
 
-value_counts = df[target_variable].value_counts()
-display_options = [f"{val} ({value_counts[val]})" for val in value_counts.index]
+rebinned_columns = {}
 
-selected_display = st.selectbox(
-    f"🎯 Value in {target_variable} to Explain",
-    display_options,
-    key="target_val"
-)
+# Step 2: Choose target variable
+target_variable_raw = st.selectbox("🎯 Target Variable (A)", all_vars, key="target_var")
+target_variable = target_variable_raw  # Will change to binned name if needed
 
-# Extract just the raw value (without the count)
-target_value = selected_display.split(" (")[0]
+# Step 3: Define binning logic
+def interactive_rebin(var_name, label_prefix, default_bins=3):
+    raw = original_df[var_name].dropna()
+    clean_name = var_name.replace("#number", "")
 
-independent_vars = st.multiselect("📋 Explanatory Variables (B, C, D, etc.)", [c for c in categorical_cols if c != target_variable], max_selections=4)
+    with st.expander(f"🔧 Adjust bins for {label_prefix} Variable: {clean_name}", expanded=True):
+        # Layout: histogram on the left (60%), UI on the right (40%)
+        col1, col2 = st.columns([3, 2])
+
+        # Plot in left column
+        with col1:
+            fig, ax = plt.subplots(figsize=(2.2, 1.2))
+            ax.hist(raw, bins=30, edgecolor='black')
+            ax.set_title(f"Histogram of {clean_name}", fontsize=4)
+            ax.tick_params(labelsize=3)
+            st.pyplot(fig, use_container_width=True)
+
+        # Bin controls in right column
+        with col2:
+            n_bins = st.slider(f"Number of bins for {clean_name}", 2, 10, default_bins)
+            min_val, max_val = float(raw.min()), float(raw.max())
+            edges = np.linspace(min_val, max_val, n_bins + 1)
+
+            new_edges = []
+            for i, edge in enumerate(edges):
+                new_edge = st.number_input(
+                    f"Edge {i+1}", min_val, max_val, edge,
+                    step=(max_val - min_val) / 100,
+                    key=f"edge_{var_name}_{i}"
+                )
+                new_edges.append(new_edge)
+
+        cleaned_edges = sorted(set(new_edges))
+        if len(cleaned_edges) >= 2:
+            binned = pd.cut(raw, bins=cleaned_edges, include_lowest=True)
+            new_col = f"__binned__{clean_name}"
+            
+            def format_bin_label(interval):
+                if isinstance(interval, pd._libs.interval.Interval):
+                    left, right = interval.left, interval.right
+                    # Use adaptive precision based on bin width
+                    width = right - left
+                    if width < 0.001:
+                        return f"[{left:.5f}, {right:.5f})"
+                    elif width < 0.01:
+                        return f"[{left:.4f}, {right:.4f})"
+                    elif width < 0.1:
+                        return f"[{left:.3f}, {right:.3f})"
+                    elif width < 1:
+                        return f"[{left:.2f}, {right:.2f})"
+                    elif width < 10:
+                        return f"[{left:.1f}, {right:.1f})"
+                    else:
+                        return f"[{left:.0f}, {right:.0f})"
+                return str(interval)
+
+            df[new_col] = pd.Series(binned.map(format_bin_label), index=raw.index)
+
+            
+            rebinned_columns[var_name] = new_col
+            st.success(f"{label_prefix} binned into {len(cleaned_edges) - 1} intervals.")
+            return new_col
+        else:
+            st.warning("You must specify at least two distinct bin edges.")
+            return None
+
+# Step 4: Rebin if numeric target
+if "#number" in target_variable_raw:
+    binned_col = interactive_rebin(target_variable_raw, label_prefix="Target")
+    if binned_col:
+        target_variable = binned_col
+
+# Step 5: Confirm target value
+if target_variable and target_variable in df.columns:
+    value_counts = df[target_variable].value_counts(sort=False)
+
+    def safe_bin_key(x):
+        try:
+            match = re.search(r"[-+]?[0-9]*\.?[0-9]+", str(x))
+            return float(match.group()) if match else float('inf')
+        except Exception:
+            return float('inf')
+
+    sorted_bins = sorted(value_counts.index.tolist(), key=safe_bin_key)
+    display_options = [f"{val} ({value_counts[val]})" for val in sorted_bins]
+
+    selected_display = st.selectbox(
+        f"🎯 Value in {target_variable} to Explain",
+        display_options,
+        key="target_val"
+    )
+
+    target_value = selected_display.split(" (")[0]
+else:
+    target_value = None
+
+# Step 6: Select explanatory variables
+candidates = [col for col in all_vars if col != target_variable_raw]
+selected_explanatory = st.multiselect("📋 Explanatory Variables (B, C, D, etc.)", options=candidates, max_selections=4)
+
+independent_vars = []
+label_lookup = {}
+for var in selected_explanatory:
+    if "#number" in var:
+        binned = rebinned_columns.get(var)
+        if not binned:
+            binned = interactive_rebin(var, label_prefix="Explanatory")
+        if binned and binned in df.columns:
+            independent_vars.append(binned)
+            label_lookup[binned] = binned.replace("__binned__", "")
+    else:
+        independent_vars.append(var)
+        label_lookup[var] = var
+
+# Also record a cleaned label for the target
+if "__binned__" in target_variable:
+    label_lookup[target_variable] = target_variable.replace("__binned__", "")
+else:
+    label_lookup[target_variable] = target_variable
+
+# Trigger computation if ready
+if target_variable and target_value and independent_vars:
+    pass  # Section 3 will proceed with computation automatically
 
 
 
 ##### --- Section 3 - Compute Accuracy and Factor Contributions ---
 
-st.markdown("## 🧮 Step 3: Compute Rules and Factor Contributions")
+st.markdown("### 🧮 Rules and Factor Contributions")
 
 # Sliders for dynamic filtering – compact layout
 with st.container():
@@ -105,25 +225,29 @@ if target_variable and target_value and independent_vars:
             continue
 
         acc_full = (subset[target_variable] == target_value).mean()
-        rule_str = " AND ".join([f"{k}={v}" for k, v in combo_dict.items()])
+        rule_str = " AND ".join([f"{label_lookup.get(k, k)}={v}" for k, v in combo_dict.items()])
+        rule_str = rule_str.replace("__binned__", "")
         row = {
             'Rule': rule_str,
             'n': len(subset),
-            f'Accuracy → {target_value}': acc_full
+            f'Accuracy → {target_value}': round(acc_full, 2)
         }
 
         for var in independent_vars:
             reduced = {k: v for k, v in combo_dict.items() if k != var}
             reduced_df = df[(df[list(reduced)] == pd.Series(reduced)).all(axis=1)]
             acc_reduced = (reduced_df[target_variable] == target_value).mean() if len(reduced_df) > 0 else None
-            row[f'Contribution of {var}'] = acc_full - acc_reduced if acc_reduced is not None else None
+            clean_label = label_lookup.get(var, var).replace("__binned__", "")
+            row[f'Contrib of {clean_label}'] = round(acc_full - acc_reduced, 2) if acc_reduced is not None else None
+
 
         rows.append(row)
 
     result_df = pd.DataFrame(rows)
+    result_df.reset_index(drop=True, inplace=True)
 
     # Apply filters dynamically
-    contrib_cols = [c for c in result_df.columns if c.startswith("Contribution of")]
+    contrib_cols = [c for c in result_df.columns if c.startswith("Contrib of")]
     filtered_df = result_df[
         (result_df['n'] >= min_n) &
         (result_df[f'Accuracy → {target_value}'] >= min_acc)
@@ -150,7 +274,7 @@ if target_variable and target_value and independent_vars:
         if row[f'Accuracy → {target_value}'] > 0.8:
             style = ['background-color: lightgreen'] * len(row)
         for i, col in enumerate(row.index):
-            if col.startswith("Contribution of") and abs(row[col]) > 0.2:
+            if col.startswith("Contrib of") and abs(row[col]) > 0.2:
                 style[i] = 'background-color: khaki'
         return style
 
@@ -159,7 +283,14 @@ if target_variable and target_value and independent_vars:
         st.warning("⚠️ No rules matched the filters.")
     else:
         st.success(f"✅ Showing {len(filtered_df)} rules")
-        st.dataframe(filtered_df.style.apply(highlight, axis=1))
+        st.dataframe(
+            filtered_df.style
+                .apply(highlight, axis=1)
+                .format(precision=2),
+            use_container_width=True,
+            hide_index=True
+)
+
         st.session_state.modified_df = filtered_df.copy()
 
         # CSV export
@@ -172,23 +303,7 @@ if target_variable and target_value and independent_vars:
         )
 
 
-	
-##### --- Section 4 - Download Results Table ---
 
-st.markdown("---")
-st.subheader("💾 Download Factor Contribution Table")
-
-if "modified_df" in st.session_state and not st.session_state.modified_df.empty:
-    csv_out = io.StringIO()
-    st.session_state.modified_df.to_csv(csv_out, index=False)
-    st.download_button(
-        label="📥 Download CSV",
-        data=csv_out.getvalue(),
-        file_name="factor_contributions.csv",
-        mime="text/csv"
-    )
-else:
-    st.warning("⚠️ No data available to download yet. Please run the analysis first.")
 
 
 # ---- Return to Home button ----

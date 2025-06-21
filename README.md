@@ -1,24 +1,36 @@
 # SuAVE Factor Contribution App
 
-This Streamlit app allows you to explore conditional accuracy contributions from categorical and boolean variables in a SuAVE survey. The contribution is measured as the difference between the accuracy of rules like "If A and B then C" and "If B then C", where A, B, and C are logical conditions over survey variables.
+This Streamlit app allows you to explore how combinations of categorical, boolean, or numeric variables contribute to predicting an outcome in a SuAVE survey. It computes the added predictive value of each variable using rules like "If A and B then C" vs. "If B then C", where A and B are input conditions and C is the target outcome.
 
 ## Features
 
-- Load any SuAVE dataset by passing `?csv=...&surveyurl=...` in the URL
-- Select sets of binary/categorical variables to serve as conditions A, B, and target C
-- Automatically compute and display:
-  - Count of matches for A, B, and C combinations
-  - Accuracy of "if A and B then C"
-  - Contribution of A to prediction
-- Visual preview of selected variable breakdowns
-- Publish a new SuAVE dataset with computed variables
+- Load any SuAVE dataset via URL query parameters (`?csv=...&surveyurl=...`)
+- Interactive variable selection (target and explanatory)
+- Full support for numeric variables via dynamic binning:
+  - Interactive histogram visualization of distributions
+  - Adjustable bin count and bin edges for numeric columns
+  - Uses bin labels as categorical inputs for rule generation
+- Generates all rule combinations and computes:
+  - Rule count (n)
+  - Conditional accuracy of "if A and B then C"
+  - Contribution of each variable to prediction accuracy
+- Dynamic filters:
+  - Minimum rule count
+  - Minimum accuracy
+  - Minimum absolute contribution
+- Visual output:
+  - Clean, readable HTML table
+  - Highlighted contributions and accuracy
+  - Wrapped variable names and line breaks in rule display
+  - Emphasized values in rules (blue italic)
+- CSV download of filtered results
 
 ## How to Launch
 
-You can use this app on Streamlit Community Cloud:
+ou can use this app on Streamlit Community Cloud:
 
-1. Go to the deployed app URL: https://suave-factor.streamlit.app
-2. Append the dataset as query parameters:
+1. Visit: https://suave-factor.streamlit.app
+2. Add your dataset in the URL like this:
 
 ```
 ?user=suavedemos&csv=demo_dataset.csv&surveyurl=https://suave-net.sdsc.edu/main/file=suavedemos_demo_dataset.csv
@@ -41,8 +53,6 @@ See [requirements.txt](./requirements.txt)
 
 2. **Install dependencies**
 
-   Create a virtual environment or install with:
-
    ```bash
    pip install -r requirements.txt
    ```
@@ -58,7 +68,7 @@ See [requirements.txt](./requirements.txt)
    - Push your repo to GitHub
    - Go to https://streamlit.io/cloud
    - Click **"New App"**
-   - Choose your repo and `app.py`
+   - Select your repo and `app.py`
    - Click **"Deploy"**
 
 ---
