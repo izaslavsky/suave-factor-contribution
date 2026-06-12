@@ -11,6 +11,14 @@ from itertools import product
 # ---- Page config ----
 st.set_page_config(page_title="Factor Contributions", layout="wide")
 
+@st.cache_data(show_spinner="Loading survey data…")
+def load_csv(url):
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    d = pd.read_csv(io.StringIO(r.text))
+    d.columns = d.columns.str.strip()
+    return d
+
 # ---- Read query params from URL ----
 query_params = st.query_params
 user = query_params.get("user", None)
@@ -22,34 +30,25 @@ dzc_file = query_params.get("dzc", None)
 st.title("🔍 Factor Contribution Explorer")
 st.markdown("**Assess how combinations of attributes contribute to outcome accuracy in a survey dataset.**")
 
+if not csv_filename or not survey_url:
+    st.error("❌ Missing `csv` filename or `surveyurl` in query parameters.")
+    st.stop()
+
+parsed  = urlparse(survey_url)
+csv_url = f"{parsed.scheme}://{parsed.netloc}/surveys/{csv_filename}"
+
+try:
+    df = load_csv(csv_url)
+except Exception as e:
+    st.error(f"❌ Could not fetch CSV from SuAVE: {e}")
+    st.stop()
+
 # ---- Diagnostics and file loading ----
 with st.expander("⚙️ Diagnostics and Input Info", expanded=False):
     st.markdown(f"🧪 <span style='font-size: 0.85em;'>**Streamlit version:** {st.__version__}</span>", unsafe_allow_html=True)
     st.markdown(f"👤 <span style='font-size: 0.85em;'>**User:** {user}</span>", unsafe_allow_html=True)
     st.markdown(f"📂 <span style='font-size: 0.85em;'>**CSV File:** {csv_filename}</span>", unsafe_allow_html=True)
-
-    if not csv_filename or not survey_url:
-        st.error("❌ Missing `csv` filename or `surveyurl` in query parameters.")
-        st.stop()
-
-    parsed = urlparse(survey_url)
-    base_url = f"{parsed.scheme}://{parsed.netloc}/surveys/"
-    csv_url = base_url + csv_filename
-    st.markdown(f"🔗 <span style='font-size: 0.85em;'>Trying URL: `{csv_url}`</span>", unsafe_allow_html=True)
-
-    @st.cache_data(show_spinner=False)
-    def load_csv(url):
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        d = pd.read_csv(io.StringIO(r.text))
-        d.columns = d.columns.str.strip()
-        return d
-
-    try:
-        df = load_csv(csv_url)
-    except Exception as e:
-        st.error(f"❌ Could not fetch CSV from SuAVE: {e}")
-        st.stop()
+    st.markdown(f"🔗 URL: {csv_url}")
     st.markdown("📋 First few rows of data:")
     st.write(df.head(3))
     st.markdown(f"✅ Dataset loaded with **{df.shape[0]} rows** and **{df.shape[1]} columns**")
